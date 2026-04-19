@@ -1,0 +1,13 @@
+To: kristinapaudel69@gmail.com
+Subject: Your JobNova password reset code
+Date: 2026-04-16T07:39:32+02:00
+
+Hello kristina,
+
+Your JobNova password reset code is: 993622
+
+This code will expire in 1 hour.
+
+Use it on the reset password page together with your email address.
+
+If you did not request this reset, you can ignore this email.

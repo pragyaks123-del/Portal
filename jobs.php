@@ -7,6 +7,8 @@ require __DIR__ . '/includes/bootstrap.php';
 $user = currentUser();
 $filters = buildJobFilters();
 $jobs = fetchJobs($filters, 0, $user ? (int) $user['id'] : null);
+// Dev 2: CV Scan - reuse the seeker's scanned resume to calculate listing match summaries.
+$resume = $user && $user['role'] === 'job_seeker' ? fetchResume((int) $user['id']) : null;
 
 renderHeader('Jobs');
 ?>
@@ -61,13 +63,37 @@ renderHeader('Jobs');
             <div class="panel empty">No jobs matched these filters yet. Try broadening the search or removing one filter.</div>
         <?php endif; ?>
         <?php foreach ($jobs as $job): ?>
+            <?php // Dev 2: CV Scan - calculate the match inside the loop because each job has different skills. ?>
+            <?php $match = $user && $user['role'] === 'job_seeker' ? resumeMatchForJob($resume, $job) : null; ?>
             <article class="job-card list-card">
                 <div class="job-card-top">
                     <div>
                         <p class="meta-line"><?= e($job['company_name'] ?: $job['employer_name']) ?></p>
                         <h2><a href="job.php?id=<?= (int) $job['id'] ?>"><?= e($job['title']) ?></a></h2>
                     </div>
-                    <span class="badge badge-soft"><?= e($job['job_type']) ?></span>
+                    <div class="match-card-actions">
+                        <?php if ($match): ?>
+                            <details class="match-summary">
+                                <summary><?= (int) $match['score'] ?>% match</summary>
+                                <div class="match-breakdown">
+                                    <?php foreach ($match['matched_requirements'] as $requirement): ?>
+                                        <p class="match-line have"><span aria-hidden="true">&#10003;</span><?= e($requirement) ?></p>
+                                    <?php endforeach; ?>
+                                    <?php foreach ($match['missing_requirements'] as $requirement): ?>
+                                        <p class="match-line missing"><span aria-hidden="true">&#10007;</span><?= e($requirement) ?></p>
+                                    <?php endforeach; ?>
+                                    <?php if (!$match['missing_requirements']): ?>
+                                        <p class="small">You meet the listed requirements for this role.</p>
+                                    <?php else: ?>
+                                        <p class="small">You are missing: <?= e(implode(', ', $match['missing_requirements'])) ?></p>
+                                    <?php endif; ?>
+                                </div>
+                            </details>
+                        <?php elseif ($user && $user['role'] === 'job_seeker' && $resume && ($resume['scan_status'] ?? '') === 'failed'): ?>
+                            <span class="status danger">CV unreadable</span>
+                        <?php endif; ?>
+                        <span class="badge badge-soft"><?= e($job['job_type']) ?></span>
+                    </div>
                 </div>
                 <div class="job-meta">
                     <span><?= e($job['location']) ?></span>

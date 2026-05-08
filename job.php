@@ -15,6 +15,8 @@ if (!$job) {
 $user = currentUser();
 $applicationStatus = $user && $user['role'] === 'job_seeker' ? jobApplicationStatus($jobId, (int) $user['id']) : null;
 $resume = $user && $user['role'] === 'job_seeker' ? fetchResume((int) $user['id']) : null;
+// Dev 2: CV Scan - build a private seeker-only match score for this job.
+$match = $user && $user['role'] === 'job_seeker' ? resumeMatchForJob($resume, $job) : null;
 $relatedJobs = fetchRelatedJobs($job, 3);
 
 renderHeader('Job Details');
@@ -90,6 +92,35 @@ renderHeader('Job Details');
                 </form>
             <?php endif; ?>
         </div>
+
+        <?php if ($user && $user['role'] === 'job_seeker'): ?>
+            <div class="panel sidebar-card">
+                <h3>Your CV Match</h3>
+                <?php // Dev 2: CV Scan - show matched and missing requirements without exposing the resume to employers here. ?>
+                <?php if ($match): ?>
+                    <strong class="match-score-large"><?= (int) $match['score'] ?>% match</strong>
+                    <div class="match-breakdown open">
+                        <?php foreach ($match['matched_requirements'] as $requirement): ?>
+                            <p class="match-line have"><span aria-hidden="true">&#10003;</span><?= e($requirement) ?></p>
+                        <?php endforeach; ?>
+                        <?php foreach ($match['missing_requirements'] as $requirement): ?>
+                            <p class="match-line missing"><span aria-hidden="true">&#10007;</span><?= e($requirement) ?></p>
+                        <?php endforeach; ?>
+                        <?php if ($match['missing_requirements']): ?>
+                            <p class="small">You are missing: <?= e(implode(', ', $match['missing_requirements'])) ?></p>
+                        <?php else: ?>
+                            <p class="small">You meet the listed requirements for this role.</p>
+                        <?php endif; ?>
+                    </div>
+                <?php elseif ($resume && ($resume['scan_status'] ?? '') === 'failed'): ?>
+                    <p class="status danger">CV unreadable</p>
+                    <p class="small"><?= e($resume['scan_error'] ?? 'We could not read your CV - please upload a text-based PDF.') ?></p>
+                <?php else: ?>
+                    <p class="small">Upload and scan your resume to see a private match score.</p>
+                    <a class="button-link full-width ghost" href="profile.php">Upload Resume</a>
+                <?php endif; ?>
+            </div>
+        <?php endif; ?>
 
         <?php if ($user && $user['role'] === 'job_seeker'): ?>
             <form method="post" action="toggle-save-job.php" class="panel sidebar-card filters">

@@ -1,0 +1,9 @@
+{
+  "require": {
+    "phpoffice/phpword": "^1.1",
+    "smalot/pdfparser": "^2.12"
+  },
+  "config": {
+    "preferred-install": "dist"
+  }
+}

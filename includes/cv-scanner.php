@@ -3,8 +3,39 @@
 declare(strict_types=1);
 
 // Dev 2: CV Scan - coordinates API parsing, local text extraction, and job matching.
-function scanResumeFile(string $path, string $extension, string $manualSummary = '', string $manualSkills = ''): array
+function supportedResumeExtensions(): array
 {
+    return ['pdf', 'docx'];
+}
+
+function supportedResumeAcceptAttribute(): string
+{
+    $extensions = array_map(static fn (string $extension): string => '.' . $extension, supportedResumeExtensions());
+
+    return implode(',', $extensions);
+}
+
+function supportedResumeFormatsLabel(): string
+{
+    return 'text-based PDF and DOCX files';
+}
+
+function resumeUploadErrorMessage(int $errorCode, string $supportedFormats): string
+{
+    return match ($errorCode) {
+        UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE => 'That CV file is too large for the server upload limit. Please upload a smaller ' . $supportedFormats . ' file.',
+        UPLOAD_ERR_PARTIAL => 'The CV only uploaded partially. Please try again.',
+        UPLOAD_ERR_NO_TMP_DIR => 'The server upload folder is missing. Please contact the site administrator.',
+        UPLOAD_ERR_CANT_WRITE => 'The server could not write the uploaded CV. Please contact the site administrator.',
+        UPLOAD_ERR_EXTENSION => 'The CV upload was blocked by a server extension.',
+        default => 'Please choose a ' . $supportedFormats . ' resume file.',
+    };
+}
+
+function scanResumeFile(string $path, string $extension, string $manualSummary = '', string $manualSkills = ''): array
+
+{
+        set_time_limit(30); //
     $startedAt = time();
     $apiScan = parseResumeWithCvParserApi($path, $manualSummary, $manualSkills, $startedAt);
 
@@ -18,7 +49,7 @@ function scanResumeFile(string $path, string $extension, string $manualSummary =
     if ($text === '') {
         return [
             'status' => 'failed',
-            'error' => 'We could not read your CV - please upload a text-based PDF, DOCX, or a clear image CV.',
+            'error' => 'We could not read your CV - please upload a text-based PDF',
             'parsed_text' => '',
             'summary' => $manualSummary,
             'skills' => $manualSkills,
@@ -308,11 +339,10 @@ function flattenCvParserText(mixed $value): string
 
 function extractResumeText(string $path, string $extension): string
 {
-    // Dev 2: Route each uploaded resume format to the best available text extractor.
+    // Dev 2: CV parsing is intentionally limited to cvparser.ai, smalot/pdfparser, and phpoffice/phpword.
     return match ($extension) {
         'pdf' => extractPdfText($path),
         'docx' => extractDocxText($path),
-        'png', 'jpg', 'jpeg', 'webp', 'tif', 'tiff' => extractImageText($path),
         default => '',
     };
 }
@@ -336,29 +366,7 @@ function extractPdfText(string $path): string
         }
     }
 
-    if (commandExists('pdftotext')) {
-        $output = shell_exec('pdftotext -layout ' . escapeshellarg($path) . ' - 2>NUL');
-        if (is_string($output) && trim($output) !== '') {
-            return $output;
-        }
-    }
-
-    $raw = @file_get_contents($path);
-    if (!is_string($raw) || $raw === '') {
-        return '';
-    }
-
-    preg_match_all('/\((?:\\\\.|[^\\\\()])*\)\s*Tj|\[(.*?)\]\s*TJ/s', $raw, $matches);
-    $chunks = [];
-
-    foreach ($matches[0] as $match) {
-        preg_match_all('/\((?:\\\\.|[^\\\\()])*\)/s', $match, $strings);
-        foreach ($strings[0] as $pdfString) {
-            $chunks[] = decodePdfString(substr($pdfString, 1, -1));
-        }
-    }
-
-    return implode(' ', $chunks);
+    return '';
 }
 
 function extractDocxText(string $path): string
@@ -379,33 +387,7 @@ function extractDocxText(string $path): string
         }
     }
 
-    $parts = ['word/document.xml', 'word/header1.xml', 'word/footer1.xml'];
-    $text = '';
-
-    if (class_exists(ZipArchive::class)) {
-        $zip = new ZipArchive();
-        if ($zip->open($path) !== true) {
-            return '';
-        }
-
-        foreach ($parts as $part) {
-            $xml = $zip->getFromName($part);
-            if (is_string($xml)) {
-                $text .= ' ' . docxXmlToText($xml);
-            }
-        }
-
-        $zip->close();
-
-        return $text;
-    }
-
-    $entries = readZipEntries($path, $parts);
-    foreach ($entries as $xml) {
-        $text .= ' ' . docxXmlToText($xml);
-    }
-
-    return $text;
+    return '';
 }
 
 function phpWordDocumentToText(object $phpWord): string
@@ -441,100 +423,6 @@ function phpWordElementsToText(array $elements, array &$lines): void
             }
         }
     }
-}
-
-function docxXmlToText(string $xml): string
-{
-    $xml = str_replace(['</w:p>', '</w:tr>'], "\n", $xml);
-
-    return html_entity_decode(strip_tags($xml), ENT_QUOTES | ENT_XML1, 'UTF-8');
-}
-
-function readZipEntries(string $path, array $wantedNames): array
-{
-    $data = @file_get_contents($path);
-    if (!is_string($data) || $data === '') {
-        return [];
-    }
-
-    $wanted = array_fill_keys($wantedNames, true);
-    $offset = 0;
-    $entries = [];
-    $length = strlen($data);
-
-    while ($offset + 30 < $length) {
-        $signature = substr($data, $offset, 4);
-        if ($signature !== "PK\x03\x04") {
-            $next = strpos($data, "PK\x03\x04", $offset + 1);
-            if ($next === false) {
-                break;
-            }
-            $offset = $next;
-            continue;
-        }
-
-        $header = unpack(
-            'vversion/vflags/vmethod/vtime/vdate/Vcrc/Vcompressed/Vuncompressed/vnameLength/vextraLength',
-            substr($data, $offset + 4, 26)
-        );
-
-        if (!$header) {
-            break;
-        }
-
-        $nameStart = $offset + 30;
-        $name = substr($data, $nameStart, (int) $header['nameLength']);
-        $bodyStart = $nameStart + (int) $header['nameLength'] + (int) $header['extraLength'];
-        $bodyLength = (int) $header['compressed'];
-
-        if ($bodyStart + $bodyLength > $length) {
-            break;
-        }
-
-        if (isset($wanted[$name])) {
-            $body = substr($data, $bodyStart, $bodyLength);
-            if ((int) $header['method'] === 8) {
-                $body = @gzinflate($body);
-            }
-            if (is_string($body)) {
-                $entries[$name] = $body;
-            }
-        }
-
-        $offset = $bodyStart + $bodyLength;
-    }
-
-    return $entries;
-}
-
-function extractImageText(string $path): string
-{
-    if (!commandExists('tesseract')) {
-        return '';
-    }
-
-    $output = shell_exec('tesseract ' . escapeshellarg($path) . ' stdout --psm 6 2>NUL');
-
-    return is_string($output) ? $output : '';
-}
-
-function commandExists(string $command): bool
-{
-    $probe = PHP_OS_FAMILY === 'Windows'
-        ? 'where ' . escapeshellarg($command) . ' 2>NUL'
-        : 'command -v ' . escapeshellarg($command) . ' 2>/dev/null';
-
-    $output = shell_exec($probe);
-
-    return is_string($output) && trim($output) !== '';
-}
-
-function decodePdfString(string $value): string
-{
-    $value = preg_replace('/\\\\([nrtbf()\\\\])/', ' ', $value) ?? $value;
-    $value = preg_replace('/\\\\[0-7]{1,3}/', ' ', $value) ?? $value;
-
-    return $value;
 }
 
 function cleanParsedText(string $text): string
@@ -689,6 +577,60 @@ function buildResumeSummary(string $text, array $fields): string
     }
 
     return mb_substr(preg_replace('/\s+/', ' ', $text) ?? $text, 0, 260);
+}
+
+function buildCvScanGuidance(?array $resume): array
+{
+    if (!$resume) {
+        return [
+            'Upload your CV to unlock automatic skill detection and job match scores.',
+            'Use PDF, DOCX, TXT, or a clear image for the best result, and keep skills separated with commas.',
+        ];
+    }
+
+    if (($resume['scan_status'] ?? 'completed') === 'failed') {
+        return [
+            'The file was saved, but the scanner could not read the text.',
+            'Add your summary and skills manually, or upload a text-based PDF/DOCX/TXT.',
+        ];
+    }
+
+    $guidance = [];
+    $skills = normalizeSkillList((string) ($resume['extracted_skills'] ?? '') . ', ' . (string) ($resume['skills'] ?? ''));
+    $summary = trim((string) ($resume['summary'] ?? ''));
+    $education = trim((string) ($resume['education'] ?? ''));
+    $jobTitles = trim((string) ($resume['job_titles'] ?? ''));
+    $yearsExperience = (int) ($resume['years_experience'] ?? 0);
+
+    if (trim((string) ($resume['parsed_text'] ?? '')) === '') {
+        $guidance[] = 'Your CV file was uploaded. Add summary and skills manually if automatic text detection is limited on this server.';
+    }
+
+    if (count($skills) < 3) {
+        $guidance[] = 'Add at least three clear skills, such as PHP, JavaScript, SQL, Communication, or Project Management.';
+    }
+
+    if ($summary === '' || mb_strlen($summary) < 60) {
+        $guidance[] = 'Add a short summary that explains your role, strongest skills, and career goal.';
+    }
+
+    if ($jobTitles === '') {
+        $guidance[] = 'Include your previous role or target job title so matching can identify your career area.';
+    }
+
+    if ($yearsExperience === 0) {
+        $guidance[] = 'Mention your experience in years if applicable, for example 2 years of experience.';
+    }
+
+    if ($education === '') {
+        $guidance[] = 'Add education, training, certification, or diploma details to strengthen your profile.';
+    }
+
+    if ($guidance === []) {
+        $guidance[] = 'Your CV has enough details for skills, experience, education, and job matching.';
+    }
+
+    return $guidance;
 }
 
 function resumeMatchForJob(?array $resume, array $job): ?array

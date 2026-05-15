@@ -3,15 +3,21 @@
 declare(strict_types=1);
 
 
-// Dev 2 Sprint 2: Automatic CV Scan - add CV parsing fields when an older database is used.
+//  Automatic CV Scan - add CV parsing fields when an older database is used.
 function ensureResumeScanColumns(PDO $pdo): void
 {
+
+ // Fetch all existing columns from the resumes table
     $columns = [];
     $stmt = $pdo->query('SHOW COLUMNS FROM resumes');
 
     foreach ($stmt->fetchAll() as $column) {
         $columns[$column['Field']] = true;
     }
+    /**
+     * Required columns for CV scanning feature
+     * Each entry defines how the column should be added if missing
+     */
 
     $definitions = [
         'parsed_text' => 'ADD COLUMN parsed_text LONGTEXT DEFAULT NULL AFTER skills',
@@ -24,13 +30,19 @@ function ensureResumeScanColumns(PDO $pdo): void
         'qualifications' => 'ADD COLUMN qualifications TEXT DEFAULT NULL AFTER education',
         'scanned_at' => 'ADD COLUMN scanned_at DATETIME DEFAULT NULL AFTER qualifications',
     ];
-
+// Add missing columns only (prevents duplicate column errors)
     foreach ($definitions as $column => $definition) {
         if (!isset($columns[$column])) {
             $pdo->exec('ALTER TABLE resumes ' . $definition);
         }
     }
 
+    /**
+     * Update existing resume records:
+     * - Mark pending scans as completed
+     * - Copy skills into extracted_skills if missing
+     * - Clear scan errors
+     */
     $pdo->exec(
         "UPDATE resumes
          SET scan_status = 'completed',

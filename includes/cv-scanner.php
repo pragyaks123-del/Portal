@@ -2,24 +2,36 @@
 
 declare(strict_types=1);
 
-// Dev 2: CV Scan - coordinates API parsing, local text extraction, and job matching.
+/**
+ 
+ * CV SCANNER MODULE (DEV 2)
+ 
+ * Handles:
+ * - Resume file validation
+ * - Text extraction (PDF/DOCX)
+ * - API-based parsing (cvparser.ai)
+ * - Local fallback parsing
+ * - Skill/experience/education extraction
+ * - Job matching logic
+ */
+// for Supported resume file 
 function supportedResumeExtensions(): array
 {
     return ['pdf', 'docx'];
 }
-
+// Returns accept attribute for HTML file input
 function supportedResumeAcceptAttribute(): string
 {
     $extensions = array_map(static fn (string $extension): string => '.' . $extension, supportedResumeExtensions());
 
     return implode(',', $extensions);
 }
-
+//Human-readable supported formats label
 function supportedResumeFormatsLabel(): string
 {
     return 'text-based PDF and DOCX files';
 }
-
+//Convert PHP upload error codes into user-friendly messages
 function resumeUploadErrorMessage(int $errorCode, string $supportedFormats): string
 {
     return match ($errorCode) {
@@ -32,24 +44,29 @@ function resumeUploadErrorMessage(int $errorCode, string $supportedFormats): str
     };
 }
 
+//MAIN CV SCAN FUNCTION Uses external API first
+
 function scanResumeFile(string $path, string $extension, string $manualSummary = '', string $manualSkills = ''): array
 
 {
-        set_time_limit(30); //
+        set_time_limit(30); //allo sacn 
     $startedAt = time();
+
+    //Try external CV parser API
     $apiScan = parseResumeWithCvParserApi($path, $manualSummary, $manualSkills, $startedAt);
 
     if ($apiScan !== null) {
         return $apiScan;
     }
-
+//Local text extraction fallback
     $text = extractResumeText($path, $extension);
     $text = cleanParsedText($text);
 
+     // If no readable text found
     if ($text === '') {
         return [
             'status' => 'failed',
-            'error' => 'We could not read your CV - please upload a text-based PDF',
+            'error' => 'We could not read your CV - please upload a text-based PDF or DOCX file',
             'parsed_text' => '',
             'summary' => $manualSummary,
             'skills' => $manualSkills,
@@ -61,7 +78,7 @@ function scanResumeFile(string $path, string $extension, string $manualSummary =
             'duration' => time() - $startedAt,
         ];
     }
-
+//  // Step 3: Extract structured fields from text
     $fields = extractResumeFields($text, $manualSkills);
 
     return [
@@ -78,7 +95,7 @@ function scanResumeFile(string $path, string $extension, string $manualSummary =
         'duration' => time() - $startedAt,
     ];
 }
-
+//load cv
 function cvParserConfig(): array
 {
     $config = $GLOBALS['cvparser_config'] ?? [];
@@ -86,17 +103,24 @@ function cvParserConfig(): array
     return is_array($config) ? $config : [];
 }
 
+
+/**
+ * External CV parser API integration (cvparser.ai)
+ * Falls back to local parsing if API fails or disabled
+ */
+
 function parseResumeWithCvParserApi(string $path, string $manualSummary, string $manualSkills, int $startedAt): ?array
 {
     $config = cvParserConfig();
     $apiKeys = cvParserApiKeys($config);
     $endpoint = trim((string) ($config['endpoint'] ?? 'https://cvparser.ai/api/v4/parse'));
 
-    // Dev 2: Fall back to local parsing when the external CV parser is disabled or unavailable.
+    //  Fall back to local parsing when the external CV parser is disabled or unavailable.
     if (($config['enabled'] ?? false) !== true || $apiKeys === [] || $endpoint === '' || !function_exists('curl_init')) {
         return null;
     }
 
+    //read file and encode in base64 for API
     $fileContents = @file_get_contents($path);
     if (!is_string($fileContents) || $fileContents === '') {
         return null;
@@ -106,7 +130,7 @@ function parseResumeWithCvParserApi(string $path, string $manualSummary, string 
     if (!is_string($payload)) {
         return null;
     }
-
+// used api keys to send request to cvparser.ai and handle response
     foreach ($apiKeys as $apiKey) {
         $curl = curl_init($endpoint);
         curl_setopt_array($curl, [
@@ -121,11 +145,13 @@ function parseResumeWithCvParserApi(string $path, string $manualSummary, string 
             CURLOPT_TIMEOUT => (int) ($config['timeout'] ?? 25),
         ]);
 
+        
         $response = curl_exec($curl);
         $statusCode = (int) curl_getinfo($curl, CURLINFO_RESPONSE_CODE);
         $curlError = curl_error($curl);
         curl_close($curl);
 
+        //If API is failure then handling this 
         if (!is_string($response) || $response === '' || $statusCode < 200 || $statusCode >= 300) {
             logCvParserEvent('cvparser.ai request failed.', [
                 'status_code' => $statusCode,
@@ -135,6 +161,7 @@ function parseResumeWithCvParserApi(string $path, string $manualSummary, string 
             continue;
         }
 
+        //API response decode
         $decoded = json_decode($response, true);
         if (!is_array($decoded)) {
             logCvParserEvent('cvparser.ai returned invalid JSON.', [
@@ -147,6 +174,7 @@ function parseResumeWithCvParserApi(string $path, string $manualSummary, string 
         $apiFields = extractCvParserApiFields($decoded);
         $text = cleanParsedText($apiFields['text']);
 
+         // Skip empty API response
         if ($text === '' && !$apiFields['skills'] && !$apiFields['job_titles'] && !$apiFields['education']) {
             logCvParserEvent('cvparser.ai returned no readable resume fields.', [
                 'status_code' => $statusCode,
@@ -155,7 +183,7 @@ function parseResumeWithCvParserApi(string $path, string $manualSummary, string 
             continue;
         }
 
-        // Dev 2: Merge API fields with local keyword extraction so matching still works with partial API responses.
+        //  Merge API fields with local keyword extraction so matching still works with partial API responses.
         $localFields = extractResumeFields($text, trim($manualSkills . ', ' . implode(', ', $apiFields['skills'])));
         $skills = normalizeSkillList(implode(', ', array_merge($apiFields['skills'], $localFields['skills'])));
         $jobTitles = array_values(array_unique(array_merge($apiFields['job_titles'], $localFields['job_titles'])));
@@ -387,7 +415,96 @@ function extractDocxText(string $path): string
         }
     }
 
+    $text = extractDocxTextFromXmlPackage($path);
+    if (trim($text) !== '') {
+        return $text;
+    }
+
     return '';
+}
+
+function extractDocxTextFromXmlPackage(string $path): string
+{
+    $pclZipPath = __DIR__ . '/../vendor/phpoffice/phpword/src/PhpWord/Shared/PCLZip/pclzip.lib.php';
+
+    if (!class_exists(\PclZip::class)) {
+        if (!is_file($pclZipPath)) {
+            return '';
+        }
+
+        require_once $pclZipPath;
+    }
+
+    try {
+        $zip = new \PclZip($path);
+        $xmlFiles = [
+            'word/document.xml',
+            'word/header1.xml',
+            'word/header2.xml',
+            'word/header3.xml',
+            'word/footer1.xml',
+            'word/footer2.xml',
+            'word/footer3.xml',
+            'word/footnotes.xml',
+            'word/endnotes.xml',
+        ];
+        $parts = [];
+
+        foreach ($xmlFiles as $xmlFile) {
+            $contents = $zip->extract(PCLZIP_OPT_BY_NAME, $xmlFile, PCLZIP_OPT_EXTRACT_AS_STRING);
+            if (!is_array($contents) || !isset($contents[0]['content']) || !is_string($contents[0]['content'])) {
+                continue;
+            }
+
+            $text = docxXmlToText($contents[0]['content']);
+            if ($text !== '') {
+                $parts[] = $text;
+            }
+        }
+
+        return implode("\n", $parts);
+    } catch (Throwable $exception) {
+        logCvParserEvent('PclZip fallback could not read DOCX.', [
+            'error' => $exception->getMessage(),
+            'file' => basename($path),
+        ]);
+
+        return '';
+    }
+}
+
+function docxXmlToText(string $xml): string
+{
+    $reader = new \XMLReader();
+    if (!$reader->XML($xml, null, LIBXML_NONET | LIBXML_NOERROR | LIBXML_NOWARNING)) {
+        return '';
+    }
+
+    $text = '';
+
+    while ($reader->read()) {
+        if ($reader->nodeType !== \XMLReader::ELEMENT) {
+            continue;
+        }
+
+        if ($reader->localName === 't') {
+            $text .= $reader->readString();
+            continue;
+        }
+
+        if (in_array($reader->localName, ['tab', 'br', 'cr'], true)) {
+            $text .= $reader->localName === 'tab' ? ' ' : "\n";
+            continue;
+        }
+
+        if ($reader->localName === 'p') {
+            $text .= "\n";
+        }
+    }
+
+    $reader->close();
+
+    return trim(html_entity_decode($text, ENT_QUOTES | ENT_XML1, 'UTF-8'));
 }
 
 function phpWordDocumentToText(object $phpWord): string
@@ -591,7 +708,7 @@ function buildCvScanGuidance(?array $resume): array
     if (($resume['scan_status'] ?? 'completed') === 'failed') {
         return [
             'The file was saved, but the scanner could not read the text.',
-            'Add your summary and skills manually, or upload a text-based PDF/DOCX/TXT.',
+            'Add your summary and skills manually, or upload a text-based PDF/DOCX.',
         ];
     }
 

@@ -25,9 +25,16 @@ if (!is_dir(MAIL_LOG_DIR)) {
 
 require_once __DIR__ . '/helpers.php';
 
-$composerAutoload = __DIR__ . '/../vendor/autoload.php';
-if (is_file($composerAutoload)) {
-    require_once $composerAutoload;
+$composerAutoloadPaths = [
+    __DIR__ . '/../vendor/autoload.php',
+    __DIR__ . '/../../vendor/autoload.php',
+];
+
+foreach ($composerAutoloadPaths as $composerAutoload) {
+    if (is_file($composerAutoload)) {
+        require_once $composerAutoload;
+        break;
+    }
 }
 
 require_once __DIR__ . '/cv-scanner.php';

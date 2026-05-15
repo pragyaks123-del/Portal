@@ -10,6 +10,10 @@ if (scanForm && scanProgress) {
 
     // Show progress bar and lock the submit button.
     scanProgress.hidden = false;
+<<<<<<< HEAD
+=======
+
+>>>>>>> 8c08e0c49f70475bd2ba411a366cfdec32451326
     const submitButtons = [
       ...scanForm.querySelectorAll('button[type="submit"]'),
     ];
@@ -37,6 +41,10 @@ if (scanForm && scanProgress) {
           button.disabled = false;
           button.textContent = "Upload Resume";
         });
+<<<<<<< HEAD
+=======
+
+>>>>>>> 8c08e0c49f70475bd2ba411a366cfdec32451326
         const errorEl = scanForm.querySelector("[data-scan-error]");
         if (errorEl) {
           errorEl.textContent =

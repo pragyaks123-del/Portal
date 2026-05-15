@@ -31,7 +31,7 @@ if (scanForm && scanProgress) {
         // Redirect so flash messages render normally after scan completes.
         window.location.href = json.redirect || window.location.href;
       } else {
-        // Show error inline — progress bar hides and button re-enables.
+        // Show error inline; progress bar hides and button re-enables.
         scanProgress.hidden = true;
         submitButtons.forEach((button) => {
           button.disabled = false;
@@ -45,7 +45,7 @@ if (scanForm && scanProgress) {
         }
       }
     } catch {
-      // Network failure — fall back to a plain submit so the user is never left stuck.
+      // Network failure; fall back to a plain submit so the user is never left stuck.
       scanProgress.hidden = true;
       submitButtons.forEach((button) => {
         button.disabled = false;
